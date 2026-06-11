@@ -10,7 +10,7 @@
 <!-- Firebase SDK -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, signInWithPopup, signOut, GoogleAuthProvider, onAuthStateChanged }
+import { getAuth, signInWithRedirect, getRedirectResult, signOut, GoogleAuthProvider, onAuthStateChanged }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, doc, setDoc, getDoc, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -37,13 +37,16 @@ const provider = new GoogleAuthProvider();
 let currentUser = null;
 let unsubSnapshot = null;
 
+// ── 處理 redirect 登入回來後的結果 ──
+getRedirectResult(auth).catch(e => console.warn('redirect result:', e));
+
 // ── Auth state ──
 onAuthStateChanged(auth, async user => {
   currentUser = user;
   if (user) {
     document.getElementById('auth-avatar').textContent = user.displayName?.[0]?.toUpperCase() || '?';
     document.getElementById('auth-name').textContent   = user.displayName || user.email;
-    document.getElementById('auth-btn').textContent    = 'Sign out';
+    document.getElementById('auth-btn').textContent    = '登出';
     document.getElementById('auth-status').textContent = '☁️ 雲端同步中';
     document.getElementById('auth-status').style.color = 'var(--teal)';
     await loadFromFirestore(user.uid);
@@ -96,7 +99,7 @@ window.firebaseSignIn = async () => {
   if (currentUser) {
     await signOut(auth);
   } else {
-    try { await signInWithPopup(auth, provider); }
+    try { await signInWithRedirect(auth, provider); }
     catch(e) { alert('登入失敗：' + e.message); }
   }
 };
