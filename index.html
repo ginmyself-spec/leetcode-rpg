@@ -37,26 +37,44 @@ const provider = new GoogleAuthProvider();
 let currentUser = null;
 let unsubSnapshot = null;
 
-// ── 處理 redirect 登入回來後的結果 ──
-getRedirectResult(auth).catch(e => console.warn('redirect result:', e));
-
-// ── Auth state ──
-onAuthStateChanged(auth, async user => {
-  currentUser = user;
+// ── UI 更新函式 ──
+function updateAuthUI(user) {
   if (user) {
     document.getElementById('auth-avatar').textContent = user.displayName?.[0]?.toUpperCase() || '?';
     document.getElementById('auth-name').textContent   = user.displayName || user.email;
     document.getElementById('auth-btn').textContent    = '登出';
     document.getElementById('auth-status').textContent = '☁️ 雲端同步中';
     document.getElementById('auth-status').style.color = 'var(--teal)';
-    await loadFromFirestore(user.uid);
-    subscribeFirestore(user.uid);
   } else {
     document.getElementById('auth-avatar').textContent = '?';
     document.getElementById('auth-name').textContent   = '未登入 — 進度僅存本機';
     document.getElementById('auth-btn').textContent    = '以 Google 帳號登入';
     document.getElementById('auth-status').textContent = '💾 本機模式';
     document.getElementById('auth-status').style.color = 'var(--txt2)';
+  }
+}
+
+// ── 頁面載入時先處理 redirect 回來的結果 ──
+getRedirectResult(auth).then(async result => {
+  if (result && result.user) {
+    // redirect 成功登入，強制更新 UI
+    currentUser = result.user;
+    updateAuthUI(result.user);
+    await loadFromFirestore(result.user.uid);
+    subscribeFirestore(result.user.uid);
+  }
+}).catch(e => {
+  console.warn('redirect result error:', e.code, e.message);
+});
+
+// ── Auth state 監聽（處理一般登入/登出/頁面重載） ──
+onAuthStateChanged(auth, async user => {
+  currentUser = user;
+  updateAuthUI(user);
+  if (user) {
+    await loadFromFirestore(user.uid);
+    subscribeFirestore(user.uid);
+  } else {
     if (unsubSnapshot) { unsubSnapshot(); unsubSnapshot = null; }
     loadLocal();
     window.renderAll();
