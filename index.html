@@ -10,37 +10,34 @@
 <!-- Firebase SDK -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, signInWithRedirect, getRedirectResult, signOut, GoogleAuthProvider, onAuthStateChanged }
+import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult,
+         signOut, GoogleAuthProvider, onAuthStateChanged }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, doc, setDoc, getDoc, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-// ╔══════════════════════════════════════════════════╗
-// ║  🔥 填入你的 Firebase 專案設定                     ║
-// ║  Firebase Console → 專案設定 → 你的應用程式 → SDK  ║
-// ╚══════════════════════════════════════════════════╝
 const firebaseConfig = {
-    apiKey: "AIzaSyDkgeuBSwVERblOJVPJKaH4sDYZxuF7eDw",
-    authDomain: "ginmyself-game.firebaseapp.com",
-    projectId: "ginmyself-game",
-    storageBucket: "ginmyself-game.firebasestorage.app",
-    messagingSenderId: "329228930936",
-    appId: "1:329228930936:web:11d25de1515e9fc316828d",
-    measurementId: "G-L3NES1K24Y"
-  };
+  apiKey:            "AIzaSyDkgeuBSwVERblOJVPJKaH4sDYZxuF7eDw",
+  authDomain:        "ginmyself-game.firebaseapp.com",
+  projectId:         "ginmyself-game",
+  storageBucket:     "ginmyself-game.firebasestorage.app",
+  messagingSenderId: "329228930936",
+  appId:             "1:329228930936:web:11d25de1515e9fc316828d"
+};
 
-const app  = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db   = getFirestore(app);
+const app      = initializeApp(firebaseConfig);
+const auth     = getAuth(app);
+const db       = getFirestore(app);
 const provider = new GoogleAuthProvider();
+provider.setCustomParameters({ prompt: 'select_account' });
 
-let currentUser = null;
+let currentUser   = null;
 let unsubSnapshot = null;
 
-// ── UI 更新函式 ──
+// ── UI helper ──
 function updateAuthUI(user) {
   if (user) {
-    document.getElementById('auth-avatar').textContent = user.displayName?.[0]?.toUpperCase() || '?';
+    document.getElementById('auth-avatar').textContent = user.displayName?.[0]?.toUpperCase() || 'U';
     document.getElementById('auth-name').textContent   = user.displayName || user.email;
     document.getElementById('auth-btn').textContent    = '登出';
     document.getElementById('auth-status').textContent = '☁️ 雲端同步中';
@@ -54,20 +51,17 @@ function updateAuthUI(user) {
   }
 }
 
-// ── 頁面載入時先處理 redirect 回來的結果 ──
+// ── 處理 redirect fallback 回來的結果 ──
 getRedirectResult(auth).then(async result => {
-  if (result && result.user) {
-    // redirect 成功登入，強制更新 UI
+  if (result?.user) {
     currentUser = result.user;
     updateAuthUI(result.user);
     await loadFromFirestore(result.user.uid);
     subscribeFirestore(result.user.uid);
   }
-}).catch(e => {
-  console.warn('redirect result error:', e.code, e.message);
-});
+}).catch(e => console.warn('redirectResult:', e.code));
 
-// ── Auth state 監聽（處理一般登入/登出/頁面重載） ──
+// ── Auth state（頁面重載、登出持久化） ──
 onAuthStateChanged(auth, async user => {
   currentUser = user;
   updateAuthUI(user);
@@ -84,43 +78,44 @@ onAuthStateChanged(auth, async user => {
 async function loadFromFirestore(uid) {
   try {
     const snap = await getDoc(doc(db, 'users', uid));
-    if (snap.exists()) {
-      window.ST = { ...window.ST, ...snap.data() };
-    }
+    if (snap.exists()) window.ST = { ...window.ST, ...snap.data() };
     window.renderAll();
-  } catch(e) { console.warn('Firestore load:', e); loadLocal(); window.renderAll(); }
+  } catch(e) { console.warn('load:', e); loadLocal(); window.renderAll(); }
 }
 
 function subscribeFirestore(uid) {
   if (unsubSnapshot) unsubSnapshot();
   unsubSnapshot = onSnapshot(doc(db, 'users', uid), snap => {
-    if (snap.exists()) {
-      window.ST = { ...window.ST, ...snap.data() };
-      window.renderAll();
-    }
+    if (snap.exists()) { window.ST = { ...window.ST, ...snap.data() }; window.renderAll(); }
   });
 }
 
 async function saveToFirestore() {
   if (!currentUser) return;
-  try {
-    await setDoc(doc(db, 'users', currentUser.uid), window.ST, { merge: true });
-  } catch(e) { console.warn('Firestore save:', e); }
+  try { await setDoc(doc(db, 'users', currentUser.uid), window.ST, { merge: true }); }
+  catch(e) { console.warn('save:', e); }
 }
 
 function loadLocal() {
   try { const r = localStorage.getItem('lcrpg'); if(r) window.ST = JSON.parse(r); } catch(e){}
 }
 
-// ── Exposed to global ──
+// ── 登入：優先 popup，被瀏覽器封鎖時自動 fallback 到 redirect ──
 window.firebaseSignIn = async () => {
-  if (currentUser) {
-    await signOut(auth);
-  } else {
-    try { await signInWithRedirect(auth, provider); }
-    catch(e) { alert('登入失敗：' + e.message); }
+  if (currentUser) { await signOut(auth); return; }
+  try {
+    await signInWithPopup(auth, provider);
+  } catch(e) {
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request') {
+      // 瀏覽器封鎖 popup → 改用 redirect
+      try { await signInWithRedirect(auth, provider); }
+      catch(e2) { alert('登入失敗：' + e2.message); }
+    } else if (e.code !== 'auth/popup-closed-by-user') {
+      alert('登入失敗：' + e.code);
+    }
   }
 };
+
 window.firebaseSave = async () => {
   try { localStorage.setItem('lcrpg', JSON.stringify(window.ST)); } catch(e){}
   await saveToFirestore();
