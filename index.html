@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LeetCode RPG: Level Up Your Embedded Software Skills</title>
+<meta name="description" content="An interactive RPG-style LeetCode tracker for Embedded Software interview prep. Level up your skills with quests, dungeons, achievements and cross-device sync.">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult,
+         signOut, GoogleAuthProvider, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey:            "AIzaSyDkgeuBSwVERblOJVPJKaH4sDYZxuF7eDw",
+  authDomain:        "ginmyself-game.firebaseapp.com",
+  projectId:         "ginmyself-game",
+  storageBucket:     "ginmyself-game.firebasestorage.app",
+  messagingSenderId: "329228930936",
+  appId:             "1:329228930936:web:11d25de1515e9fc316828d"
+};
+
+const app      = initializeApp(firebaseConfig);
+const auth     = getAuth(app);
+const db       = getFirestore(app);
+const provider = new GoogleAuthProvider();
+provider.setCustomParameters({ prompt: 'select_account' });
+
+let currentUser   = null;
+let unsubSnapshot = null;
+
+// ── UI helper ──
+function updateAuthUI(user) {
+  if (user) {
+    document.getElementById('auth-avatar').textContent = user.displayName?.[0]?.toUpperCase() || 'U';
+    document.getElementById('auth-name').textContent   = user.displayName || user.email;
+    document.getElementById('auth-btn').textContent    = '登出';
+    document.getElementById('auth-status').textContent = '☁️ 雲端同步中';
+    document.getElementById('auth-status').style.color = 'var(--teal)';
+  } else {
+    document.getElementById('auth-avatar').textContent = '?';
+    document.getElementById('auth-name').textContent   = '未登入 — 進度僅存本機';
+    document.getElementById('auth-btn').textContent    = '以 Google 帳號登入';
+    document.getElementById('auth-status').textContent = '💾 本機模式';
+    document.getElementById('auth-status').style.color = 'var(--txt2)';
+  }
+}
+
+// ── 處理 redirect fallback 回來的結果 ──
+getRedirectResult(auth).then(async result => {
+  if (result?.user) {
+    currentUser = result.user;
+    updateAuthUI(result.user);
+    await loadFromFirestore(result.user.uid);
+    subscribeFirestore(result.user.uid);
+  }
+}).catch(e => console.warn('redirectResult:', e.code));
+
+// ── Auth state（頁面重載、登出持久化） ──
+onAuthStateChanged(auth, async user => {
+  currentUser = user;
+  updateAuthUI(user);
+  if (user) {
+    await loadFromFirestore(user.uid);
+    subscribeFirestore(user.uid);
+  } else {
+    if (unsubSnapshot) { unsubSnapshot(); unsubSnapshot = null; }
+    loadLocal();
+    window.renderAll();
+  }
+});
+
+async function loadFromFirestore(uid) {
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    if (snap.exists()) window.ST = { ...window.ST, ...snap.data() };
+    window.renderAll();
+  } catch(e) { console.warn('load:', e); loadLocal(); window.renderAll(); }
+}
+
+function subscribeFirestore(uid) {
+  if (unsubSnapshot) unsubSnapshot();
+  unsubSnapshot = onSnapshot(doc(db, 'users', uid), snap => {
+    if (snap.exists()) { window.ST = { ...window.ST, ...snap.data() }; window.renderAll(); }
+  });
+}
+
+async function saveToFirestore() {
+  if (!currentUser) return;
+  try { await setDoc(doc(db, 'users', currentUser.uid), window.ST, { merge: true }); }
+  catch(e) { console.warn('save:', e); }
+}
+
+function loadLocal() {
+  try { const r = localStorage.getItem('lcrpg'); if(r) window.ST = JSON.parse(r); } catch(e){}
+}
+
+// ── 登入：優先 popup，被瀏覽器封鎖時自動 fallback 到 redirect ──
+window.firebaseSignIn = async () => {
+  if (currentUser) { await signOut(auth); return; }
+  try {
+    await signInWithPopup(auth, provider);
+  } catch(e) {
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request') {
+      // 瀏覽器封鎖 popup → 改用 redirect
+      try { await signInWithRedirect(auth, provider); }
+      catch(e2) { alert('登入失敗：' + e2.message); }
+    } else if (e.code !== 'auth/popup-closed-by-user') {
+      alert('登入失敗：' + e.code);
+    }
+  }
+};
+
+window.firebaseSave = async () => {
+  try { localStorage.setItem('lcrpg', JSON.stringify(window.ST)); } catch(e){}
+  await saveToFirestore();
+};
+</script>
+
+<!-- ░░░ Google AdSense — 替換 YOUR_ADSENSE_ID ░░░ -->
+<!-- <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-YOUR_ADSENSE_ID" crossorigin="anonymous"></script> -->
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#ffffff;--bg2:#f5f5f4;--bg3:#fafaf9;
+  --txt:#1c1c1b;--txt2:#57534e;--txt3:#a8a29e;
+  --bdr:rgba(0,0,0,.1);--bdr2:rgba(0,0,0,.18);
+  --purple:#7F77DD;--purple-l:#EEEDFE;--purple-d:#3C3489;
+  --teal:#1D9E75;--teal-l:#E1F5EE;--teal-d:#0F6E56;
+  --coral:#D85A30;--coral-l:#FAECE7;
+  --amber:#BA7517;--amber-l:#FAEEDA;--amber-d:#412402;
+  --green:#3B6D11;--green-l:#EAF3DE;
+  --red:#E24B4A;--red-l:#FCEBEB;
+  --pink-l:#FBEAF0;--pink-d:#4B1528;
+  --r-md:8px;--r-lg:12px;--r-xl:16px;
+}
+@media(prefers-color-scheme:dark){
+  :root{
+    --bg:#1c1c1b;--bg2:#282725;--bg3:#222220;
+    --txt:#fafaf9;--txt2:#a8a29e;--txt3:#57534e;
+    --bdr:rgba(255,255,255,.1);--bdr2:rgba(255,255,255,.18);
+    --purple-l:#26215C;--teal-l:#04342C;--coral-l:#4A1B0C;
+    --amber-l:#412402;--green-l:#173404;--red-l:#501313;--pink-l:#4B1528;
+  }
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg3);color:var(--txt);min-height:100vh}
+
+/* ── AD SLOTS ── */
+.ad-top,.ad-bottom,.ad-sidebar{background:var(--bg2);border:0.5px dashed var(--bdr2);border-radius:var(--r-lg);display:flex;align-items:center;justify-content:center;color:var(--txt3);font-size:12px;overflow:hidden}
+.ad-top{width:100%;height:90px;margin-bottom:1rem}
+.ad-bottom{width:100%;height:90px;margin-top:1rem}
+.ad-sidebar{width:160px;min-height:600px;flex-shrink:0}
+
+/* ── LAYOUT ── */
+.page-wrap{max-width:960px;margin:0 auto;padding:1rem}
+.content-row{display:flex;gap:1rem;align-items:flex-start}
+.main-col{flex:1;min-width:0}
+@media(max-width:700px){.ad-sidebar{display:none}.content-row{flex-direction:column}}
+
+/* ── HEADER ── */
+.site-header{text-align:center;padding:1.5rem 1rem 1rem;margin-bottom:1rem}
+.site-title{font-size:20px;font-weight:500;color:var(--txt)}
+.site-sub{font-size:13px;color:var(--txt2);margin-top:4px}
+
+/* ── AUTH BAR ── */
+.auth-bar{background:var(--bg);border:0.5px solid var(--bdr);border-radius:var(--r-lg);padding:.75rem 1rem;margin-bottom:1rem;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.auth-ava{width:32px;height:32px;border-radius:50%;background:var(--purple-l);color:var(--purple-d);font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1.5px solid var(--purple)}
+.auth-info{flex:1;min-width:0}
+.auth-nm{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.auth-st{font-size:11px;margin-top:2px}
+.auth-btn{font-size:12px;padding:5px 12px;border-radius:20px;border:0.5px solid var(--bdr2);background:transparent;cursor:pointer;color:var(--txt);white-space:nowrap;flex-shrink:0}
+.auth-btn:hover{background:var(--bg2)}
+
+/* ── APP ── */
+.app{background:var(--bg);border:0.5px solid var(--bdr);border-radius:var(--r-xl);padding:1rem;overflow:hidden}
+.nav{display:flex;gap:2px;background:var(--bg2);border-radius:var(--r-lg);padding:4px;margin-bottom:1.25rem}
+.nav-btn{flex:1;padding:7px 4px;font-size:12px;border:none;background:transparent;color:var(--txt2);cursor:pointer;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;gap:5px;transition:background .15s,color .15s;white-space:nowrap}
+.nav-btn.active{background:var(--bg);color:var(--txt);border:0.5px solid var(--bdr)}
+.screen{display:none}.screen.active{display:block}
+
+/* ── HERO ── */
+.hero-banner{border:0.5px solid var(--bdr);border-radius:var(--r-lg);overflow:hidden;margin-bottom:1rem}
+.banner-top{background:var(--bg2);padding:1rem 1.25rem;display:flex;align-items:center;gap:14px}
+.avatar-ring{width:54px;height:54px;border-radius:50%;border:2px solid var(--purple);display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--bg);font-size:24px}
+.hero-name{font-size:15px;font-weight:500}
+.hero-sub{font-size:12px;color:var(--txt2);margin-top:3px}
+.lv-pill{background:var(--purple);color:#fff;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500;margin-left:8px}
+.banner-stats{padding:.85rem 1.25rem;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;border-top:0.5px solid var(--bdr)}
+.stat-cell{text-align:center}.stat-n{font-size:20px;font-weight:500}.stat-l{font-size:11px;color:var(--txt2);margin-top:2px}
+.banner-bars{padding:.85rem 1.25rem;display:flex;flex-direction:column;gap:10px;border-top:0.5px solid var(--bdr)}
+.bar-row{display:flex;align-items:center;gap:10px;font-size:12px}
+.bar-lbl{color:var(--txt2);width:60px;flex-shrink:0;display:flex;align-items:center;gap:4px}
+.bar-track{flex:1;height:8px;background:var(--bdr);border-radius:4px;overflow:hidden}
+.bar-fill{height:100%;border-radius:4px;transition:width .5s}
+.bar-val{color:var(--txt2);width:70px;text-align:right;flex-shrink:0}
+
+/* ── BOSS ── */
+.boss-card{border:0.5px solid #F09595;background:var(--bg);border-radius:var(--r-lg);padding:.85rem 1.25rem;margin-bottom:1rem;display:flex;flex-direction:column;gap:10px}
+.boss-top{display:flex;align-items:center;gap:10px}
+.boss-ico{width:40px;height:40px;border-radius:var(--r-md);background:var(--red-l);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.boss-def{background:var(--green-l);border-color:#C0DD97}
+
+/* ── CALENDAR ── */
+.cal-row{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:1rem}
+.cal-day{width:32px;height:32px;border-radius:var(--r-md);border:0.5px solid var(--bdr);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;flex-shrink:0}
+.cal-day.lit{background:var(--teal);color:#fff;border-color:var(--teal)}
+.cal-day.today{border:1.5px solid var(--purple);color:var(--purple)}
+
+/* ── DUNGEON ── */
+.dung-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:1rem}
+.dung-card{background:var(--bg);border:0.5px solid var(--bdr);border-radius:var(--r-lg);padding:.85rem;cursor:pointer;transition:border-color .15s}
+.dung-card:hover:not(.locked){border-color:var(--bdr2)}
+.dung-card.done{border-color:var(--teal)}
+.dung-card.locked{opacity:.5;cursor:not-allowed}
+.dung-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.dung-ico{width:36px;height:36px;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.dung-title{font-size:13px;font-weight:500}.dung-sub{font-size:11px;color:var(--txt2);margin-top:2px}
+.dung-pct{font-size:11px;font-weight:500;margin-left:auto;flex-shrink:0}
+
+/* ── QUESTS ── */
+.filter-row{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:1rem}
+.flt{font-size:11px;padding:4px 10px;border-radius:20px;border:0.5px solid var(--bdr2);background:transparent;cursor:pointer;color:var(--txt2)}
+.flt.on{background:var(--purple);color:#fff;border-color:var(--purple)}
+.quest-list{display:flex;flex-direction:column;gap:6px}
+.quest-row{background:var(--bg);border:0.5px solid var(--bdr);border-radius:var(--r-lg);padding:.75rem .9rem;display:flex;align-items:center;gap:10px;cursor:pointer;transition:border-color .15s}
+.quest-row:hover{border-color:var(--bdr2)}.quest-row.done{border-color:var(--teal)}
+.chk{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--bdr2);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s;font-size:11px}
+.quest-row.done .chk{background:var(--teal);border-color:var(--teal);color:#fff}
+.q-body{flex:1;min-width:0}
+.q-title{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.q-desc{font-size:11px;color:var(--txt2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.q-badges{display:flex;align-items:center;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+.badge{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:500}
+.d-e{background:var(--green-l);color:var(--green)}.d-m{background:var(--amber-l);color:var(--amber-d)}.d-h{background:var(--coral-l);color:var(--coral)}
+.t-bit{background:var(--purple-l);color:var(--purple-d)}.t-ptr{background:var(--teal-l);color:var(--teal-d)}
+.t-mem{background:var(--amber-l);color:var(--amber-d)}.t-stk{background:var(--pink-l);color:var(--pink-d)}
+.t-tre{background:var(--green-l);color:var(--green)}.t-sys{background:var(--coral-l);color:var(--coral)}
+.xp-tag{font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:var(--txt2)}
+.lc-link{font-size:10px;padding:2px 6px;border-radius:4px;background:var(--teal-l);color:var(--teal-d);text-decoration:none;flex-shrink:0}
+.lc-link:hover{opacity:.8}
+
+/* ── ACHIEVEMENTS ── */
+.ach-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:1rem}
+.ach-card{background:var(--bg);border:0.5px solid var(--bdr);border-radius:var(--r-lg);padding:.85rem;text-align:center}
+.ach-card.on{border-color:var(--amber);background:var(--amber-l)}
+.ach-icon{font-size:24px;margin-bottom:6px}.ach-locked{filter:grayscale(1);opacity:.35}
+.ach-name{font-size:12px;font-weight:500}.ach-name.on{color:var(--amber-d)}
+.ach-desc{font-size:11px;color:var(--txt2);margin-top:3px}.ach-desc.on{color:var(--amber)}
+
+/* ── RING ── */
+.ring-wrap{display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap}
+.ring-labels{display:flex;flex-direction:column;gap:4px}
+.ring-lbl{font-size:12px;display:flex;align-items:center;gap:6px}
+.ring-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+/* ── TOAST ── */
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--bg);border:0.5px solid var(--bdr2);border-radius:var(--r-lg);padding:8px 16px;font-size:12px;display:flex;align-items:center;gap:6px;z-index:999;transition:transform .25s;white-space:nowrap;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.08)}
+#toast.show{transform:translateX(-50%) translateY(0)}
+
+/* ── MISC ── */
+.sec-lbl{font-size:11px;font-weight:500;color:var(--txt2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.big-btn{width:100%;padding:10px;font-size:13px;border-radius:var(--r-md);border:0.5px solid var(--bdr2);background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:.5rem;color:var(--txt)}
+.big-btn:hover{background:var(--bg2)}
+.empty-state{text-align:center;padding:2rem;color:var(--txt2);font-size:13px}
+.footer{text-align:center;font-size:11px;color:var(--txt3);padding:1.5rem 0 .5rem}
+</style>
+</head>
+<body>
+
+<div id="toast"><i class="ti ti-star" style="font-size:14px"></i><span id="toast-msg"></span></div>
+
+<div class="page-wrap">
+
+  <!-- ░░ AD TOP ░░ -->
+  <div class="ad-top">
+    <!-- Google AdSense 728x90 Leaderboard -->
+    <!-- <ins class="adsbygoogle" style="display:inline-block;width:728px;height:90px" data-ad-client="ca-pub-YOUR_ID" data-ad-slot="YOUR_SLOT"></ins> -->
+    <span>廣告版位 — 728×90 Leaderboard（上方）</span>
+  </div>
+
+  <header class="site-header">
+    <div class="site-title">⚔️ LeetCode RPG: Level Up Your Embedded Software Skills</div>
+    <div class="site-sub">31 精選題目 · 角色升等 · 地下城關卡 · 成就系統 · 雲端進度同步</div>
+  </header>
+
+  <!-- ░░ AUTH BAR ░░ -->
+  <div class="auth-bar">
+    <div class="auth-ava" id="auth-avatar">?</div>
+    <div class="auth-info">
+      <div class="auth-nm" id="auth-name">未登入 — 進度僅存本機</div>
+      <div class="auth-st" id="auth-status" style="color:var(--txt2)">💾 本機模式</div>
+    </div>
+    <button class="auth-btn" id="auth-btn" onclick="window.firebaseSignIn()">以 Google 帳號登入</button>
+  </div>
+
+  <div class="content-row">
+
+    <!-- ░░ AD SIDEBAR LEFT ░░ -->
+    <aside class="ad-sidebar">
+      <!-- Google AdSense 160x600 Wide Skyscraper -->
+      <!-- <ins class="adsbygoogle" style="display:inline-block;width:160px;height:600px" data-ad-client="ca-pub-YOUR_ID" data-ad-slot="YOUR_SLOT"></ins> -->
+      <span style="writing-mode:vertical-rl;font-size:11px;color:var(--txt3)">廣告版位 160×600</span>
+    </aside>
+
+    <div class="main-col">
+      <div class="app">
+
+        <nav class="nav">
+          <button class="nav-btn active" onclick="go('hero')"><i class="ti ti-sword" style="font-size:15px"></i><span>角色</span></button>
+          <button class="nav-btn" onclick="go('dungeon')"><i class="ti ti-map-2" style="font-size:15px"></i><span>地下城</span></button>
+          <button class="nav-btn" onclick="go('quests')"><i class="ti ti-list-check" style="font-size:15px"></i><span>任務</span></button>
+          <button class="nav-btn" onclick="go('ach')"><i class="ti ti-trophy" style="font-size:15px"></i><span>成就</span></button>
+        </nav>
+
+        <!-- ═══ HERO ═══ -->
+        <div id="s-hero" class="screen active">
+          <div class="hero-banner">
+            <div class="banner-top">
+              <div class="avatar-ring" id="av-el">⚔️</div>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
+                  <span class="hero-name">Embedded Warrior</span>
+                  <span class="lv-pill" id="lv-badge">Lv.1</span>
+                </div>
+                <div class="hero-sub" id="cls-lbl">新手工程師 — 剛踏入地下城</div>
+              </div>
+            </div>
+            <div class="banner-bars">
+              <div class="bar-row">
+                <div class="bar-lbl"><i class="ti ti-star" style="font-size:13px;color:var(--purple)"></i>XP</div>
+                <div class="bar-track"><div class="bar-fill" style="background:var(--purple)" id="xp-fill"></div></div>
+                <div class="bar-val" id="xp-val" style="font-size:11px">0/310</div>
+              </div>
+              <div class="bar-row">
+                <div class="bar-lbl"><i class="ti ti-flame" style="font-size:13px;color:var(--amber)"></i>連勝</div>
+                <div class="bar-track"><div class="bar-fill" style="background:var(--amber)" id="stk-fill"></div></div>
+                <div class="bar-val" id="stk-val" style="font-size:11px">0天</div>
+              </div>
+            </div>
+            <div class="banner-stats">
+              <div class="stat-cell"><div class="stat-n" id="s-done">0</div><div class="stat-l">完成</div></div>
+              <div class="stat-cell"><div class="stat-n">31</div><div class="stat-l">總題數</div></div>
+              <div class="stat-cell"><div class="stat-n" id="s-pct">0%</div><div class="stat-l">完成率</div></div>
+              <div class="stat-cell"><div class="stat-n" id="s-xp">0</div><div class="stat-l">總 XP</div></div>
+            </div>
+          </div>
+
+          <div class="boss-card" id="boss-card">
+            <div class="boss-top">
+              <div class="boss-ico" id="boss-ico">👹</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:500" id="boss-name">最終 Boss — 技術面試官</div>
+                <div style="font-size:11px;color:var(--txt2);margin-top:2px">完成所有 31 道題才能擊敗他</div>
+              </div>
+              <span style="font-size:11px;color:var(--red);flex-shrink:0" id="boss-hp-lbl">HP 31</span>
+            </div>
+            <div class="bar-track" style="height:10px"><div class="bar-fill" style="background:var(--red);width:100%" id="boss-fill"></div></div>
+          </div>
+
+          <div class="sec-lbl">本週打卡</div>
+          <div class="cal-row" id="cal-row"></div>
+
+          <div class="ring-wrap">
+            <svg width="80" height="80" viewBox="0 0 80 80">
+              <circle cx="40" cy="40" r="32" fill="none" stroke="var(--bdr)" stroke-width="8"/>
+              <circle cx="40" cy="40" r="32" fill="none" stroke="var(--purple)" stroke-width="8"
+                stroke-linecap="round" stroke-dasharray="201" stroke-dashoffset="201"
+                id="ring-circle" transform="rotate(-90 40 40)"/>
+              <text x="40" y="44" text-anchor="middle" font-size="13" font-weight="500" fill="var(--txt)" id="ring-txt">0%</text>
+            </svg>
+            <div class="ring-labels" id="ring-lbl"></div>
+          </div>
+        </div>
+
+        <!-- ═══ DUNGEON ═══ -->
+        <div id="s-dungeon" class="screen">
+          <div class="dung-grid" id="dung-grid"></div>
+          <button class="big-btn" onclick="window.open('https://leetcode.com/problemset/all/','_blank')">
+            <i class="ti ti-external-link" style="font-size:15px"></i>前往 LeetCode 開始解題
+          </button>
+        </div>
+
+        <!-- ═══ QUESTS ═══ -->
+        <div id="s-quests" class="screen">
+          <div class="filter-row" id="flt-row">
+            <button class="flt on" onclick="setF('all',this)">全部</button>
+            <button class="flt" onclick="setF('bit',this)">Bit</button>
+            <button class="flt" onclick="setF('ptr',this)">Pointer</button>
+            <button class="flt" onclick="setF('mem',this)">Memory</button>
+            <button class="flt" onclick="setF('stk',this)">Stack</button>
+            <button class="flt" onclick="setF('tre',this)">Tree</button>
+            <button class="flt" onclick="setF('sys',this)">System</button>
+            <button class="flt" onclick="setF('done',this)">✓ 完成</button>
+          </div>
+          <div class="quest-list" id="q-list"></div>
+        </div>
+
+        <!-- ═══ ACHIEVEMENTS ═══ -->
+        <div id="s-ach" class="screen">
+          <div class="ach-grid" id="ach-grid"></div>
+        </div>
+
+      </div><!-- /.app -->
+
+      <!-- ░░ AD BOTTOM ░░ -->
+      <div class="ad-bottom">
+        <!-- Google AdSense 728x90 Leaderboard -->
+        <!-- <ins class="adsbygoogle" style="display:inline-block;width:728px;height:90px" data-ad-client="ca-pub-YOUR_ID" data-ad-slot="YOUR_SLOT"></ins> -->
+        <span>廣告版位 — 728×90 Leaderboard（下方）</span>
+      </div>
+    </div><!-- /.main-col -->
+
+    <!-- ░░ AD SIDEBAR RIGHT ░░ -->
+    <aside class="ad-sidebar">
+      <!-- Google AdSense 160x600 Wide Skyscraper -->
+      <!-- <ins class="adsbygoogle" style="display:inline-block;width:160px;height:600px" data-ad-client="ca-pub-YOUR_ID" data-ad-slot="YOUR_SLOT"></ins> -->
+      <span style="writing-mode:vertical-rl;font-size:11px;color:var(--txt3)">廣告版位 160×600</span>
+    </aside>
+
+  </div><!-- /.content-row -->
+
+  <footer class="footer">LeetCode RPG · Embedded Software Interview Prep · 進度以 Firebase 雲端儲存，不收集個人資料</footer>
+</div><!-- /.page-wrap -->
+
+<script>
+// ── Data ──
+const QS=[
+  {id:'q1',t:'136. Single Number',d:'XOR 基本觀念',tag:'bit',df:'e',xp:10,url:'https://leetcode.com/problems/single-number/'},
+  {id:'q2',t:'191. Number of 1 Bits',d:'Brian Kernighan 算法',tag:'bit',df:'e',xp:10,url:'https://leetcode.com/problems/number-of-1-bits/'},
+  {id:'q3',t:'190. Reverse Bits',d:'unsigned 32-bit 位元翻轉',tag:'bit',df:'e',xp:15,url:'https://leetcode.com/problems/reverse-bits/'},
+  {id:'q4',t:'201. Bitwise AND of Range',d:'bit mask 範圍操作',tag:'bit',df:'m',xp:20,url:'https://leetcode.com/problems/bitwise-and-of-numbers-range/'},
+  {id:'q5',t:'231. Power of Two',d:'n & (n-1) 技巧',tag:'bit',df:'e',xp:10,url:'https://leetcode.com/problems/power-of-two/'},
+  {id:'q6',t:'338. Counting Bits',d:'DP + bit 結合',tag:'bit',df:'e',xp:15,url:'https://leetcode.com/problems/counting-bits/'},
+  {id:'q7',t:'206. Reverse Linked List',d:'iterative + recursive',tag:'ptr',df:'e',xp:15,url:'https://leetcode.com/problems/reverse-linked-list/'},
+  {id:'q8',t:'141. Linked List Cycle',d:'Floyd 龜兔算法',tag:'ptr',df:'e',xp:15,url:'https://leetcode.com/problems/linked-list-cycle/'},
+  {id:'q9',t:'21. Merge Two Sorted Lists',d:'遞迴 vs 迭代',tag:'ptr',df:'e',xp:15,url:'https://leetcode.com/problems/merge-two-sorted-lists/'},
+  {id:'q10',t:'876. Middle of Linked List',d:'快慢指針',tag:'ptr',df:'e',xp:10,url:'https://leetcode.com/problems/middle-of-the-linked-list/'},
+  {id:'q11',t:'19. Remove Nth from End',d:'one-pass two pointer',tag:'ptr',df:'m',xp:20,url:'https://leetcode.com/problems/remove-nth-node-from-end-of-list/'},
+  {id:'q12',t:'25. Reverse Nodes in k-Group',d:'進階指針操作',tag:'ptr',df:'h',xp:35,url:'https://leetcode.com/problems/reverse-nodes-in-k-group/'},
+  {id:'q13',t:'53. Maximum Subarray',d:"Kadane's Algorithm",tag:'mem',df:'m',xp:20,url:'https://leetcode.com/problems/maximum-subarray/'},
+  {id:'q14',t:'238. Product Except Self',d:'無除法 O(1) 空間',tag:'mem',df:'m',xp:25,url:'https://leetcode.com/problems/product-of-array-except-self/'},
+  {id:'q15',t:'287. Find Duplicate',d:'Floyd cycle detection',tag:'mem',df:'m',xp:25,url:'https://leetcode.com/problems/find-the-duplicate-number/'},
+  {id:'q16',t:'41. First Missing Positive',d:'原地哈希 O(1) space',tag:'mem',df:'h',xp:35,url:'https://leetcode.com/problems/first-missing-positive/'},
+  {id:'q17',t:'442. Find All Duplicates',d:'原地標記法',tag:'mem',df:'m',xp:20,url:'https://leetcode.com/problems/find-all-duplicates-in-an-array/'},
+  {id:'q18',t:'155. Min Stack',d:'輔助棧設計',tag:'stk',df:'m',xp:20,url:'https://leetcode.com/problems/min-stack/'},
+  {id:'q19',t:'232. Queue with Stacks',d:'amortized O(1)',tag:'stk',df:'e',xp:15,url:'https://leetcode.com/problems/implement-queue-using-stacks/'},
+  {id:'q20',t:'84. Largest Rectangle',d:'單調棧經典',tag:'stk',df:'h',xp:35,url:'https://leetcode.com/problems/largest-rectangle-in-histogram/'},
+  {id:'q21',t:'42. Trapping Rain Water',d:'two pointer vs stack',tag:'stk',df:'h',xp:35,url:'https://leetcode.com/problems/trapping-rain-water/'},
+  {id:'q22',t:'239. Sliding Window Max',d:'deque 維護最大值',tag:'stk',df:'h',xp:35,url:'https://leetcode.com/problems/sliding-window-maximum/'},
+  {id:'q23',t:'104. Max Depth Binary Tree',d:'DFS 遞迴',tag:'tre',df:'e',xp:10,url:'https://leetcode.com/problems/maximum-depth-of-binary-tree/'},
+  {id:'q24',t:'102. Level Order Traversal',d:'BFS 模板',tag:'tre',df:'m',xp:20,url:'https://leetcode.com/problems/binary-tree-level-order-traversal/'},
+  {id:'q25',t:'200. Number of Islands',d:'DFS/BFS 兩種解法',tag:'tre',df:'m',xp:20,url:'https://leetcode.com/problems/number-of-islands/'},
+  {id:'q26',t:'207. Course Schedule',d:'cycle + topological sort',tag:'tre',df:'m',xp:25,url:'https://leetcode.com/problems/course-schedule/'},
+  {id:'q27',t:'297. Serialize Binary Tree',d:'BFS 序列化',tag:'tre',df:'h',xp:35,url:'https://leetcode.com/problems/serialize-and-deserialize-binary-tree/'},
+  {id:'q28',t:'146. LRU Cache',d:'HashMap + DLL',tag:'sys',df:'m',xp:30,url:'https://leetcode.com/problems/lru-cache/'},
+  {id:'q29',t:'460. LFU Cache',d:'三層 HashMap 設計',tag:'sys',df:'h',xp:40,url:'https://leetcode.com/problems/lfu-cache/'},
+  {id:'q30',t:'1114. Print in Order',d:'mutex/semaphore 基礎',tag:'sys',df:'e',xp:15,url:'https://leetcode.com/problems/print-in-order/'},
+  {id:'q31',t:'1115. Print FooBar',d:'condition variable 應用',tag:'sys',df:'m',xp:20,url:'https://leetcode.com/problems/print-foobar-alternately/'},
+];
+const DUNG=[
+  {id:'bit',name:'Bit 熔爐',sub:'位元操作地下城',ico:'🔧',bg:'#EEEDFE',ids:['q1','q2','q3','q4','q5','q6']},
+  {id:'ptr',name:'指針迷宮',sub:'Linked List 試煉',ico:'🔗',bg:'#E1F5EE',ids:['q7','q8','q9','q10','q11','q12']},
+  {id:'mem',name:'記憶體黑洞',sub:'Array & Memory 地獄',ico:'💾',bg:'#FAEEDA',ids:['q13','q14','q15','q16','q17']},
+  {id:'stk',name:'棧與隊列城堡',sub:'Stack/Queue 試煉',ico:'🏰',bg:'#FBEAF0',ids:['q18','q19','q20','q21','q22']},
+  {id:'tre',name:'演算法森林',sub:'Tree & Graph 探索',ico:'🌳',bg:'#EAF3DE',ids:['q23','q24','q25','q26','q27']},
+  {id:'sys',name:'系統設計終局',sub:'LRU/LFU 大魔王',ico:'⚙️',bg:'#FAECE7',ids:['q28','q29','q30','q31']},
+];
+const ACHS=[
+  {id:'a1',name:'初試啼聲',desc:'完成第一道題',ico:'🌱',c:s=>s.done>=1},
+  {id:'a2',name:'位元術士',desc:'完成所有 Bit 題',ico:'🔮',c:s=>s.td.bit>=6},
+  {id:'a3',name:'指針大師',desc:'完成所有 Pointer 題',ico:'🎯',c:s=>s.td.ptr>=6},
+  {id:'a4',name:'中途英雄',desc:'完成 50% 題目',ico:'⚡',c:s=>s.done>=16},
+  {id:'a5',name:'記憶體煉金師',desc:'完成所有 Memory 題',ico:'💎',c:s=>s.td.mem>=5},
+  {id:'a6',name:'棧之守護者',desc:'完成所有 Stack 題',ico:'🛡️',c:s=>s.td.stk>=5},
+  {id:'a7',name:'Hard 挑戰者',desc:'完成 5 題 Hard',ico:'🔥',c:s=>s.hard>=5},
+  {id:'a8',name:'七日不滅',desc:'連續打卡 7 天',ico:'☀️',c:s=>s.streak>=7},
+  {id:'a9',name:'演算法探索者',desc:'完成所有 Tree 題',ico:'🌲',c:s=>s.td.tre>=5},
+  {id:'a10',name:'系統設計王',desc:'完成所有 System 題',ico:'🏆',c:s=>s.td.sys>=4},
+  {id:'a11',name:'閃電解題',desc:'單日完成 3 道題',ico:'⚡',c:s=>s.dmax>=3},
+  {id:'a12',name:'面試終結者',desc:'完成所有 31 道題',ico:'👑',c:s=>s.done>=31},
+];
+
+// ── State ──
+window.ST = {done:{},streak:0,dlog:{},dmax:0};
+try{const r=localStorage.getItem('lcrpg');if(r)window.ST=JSON.parse(r);}catch(e){}
+
+function calc(){
+  const done=QS.filter(q=>window.ST.done[q.id]).length;
+  const td={bit:0,ptr:0,mem:0,stk:0,tre:0,sys:0};
+  let hard=0,xp=0;
+  QS.forEach(q=>{if(window.ST.done[q.id]){td[q.tag]++;xp+=q.xp;if(q.df==='h')hard++;}});
+  return{done,td,hard,xp,streak:window.ST.streak||0,dmax:window.ST.dmax||0};
+}
+function lvInfo(xp){
+  const t=[0,50,130,240,380,540,720,930,1170,1450,1760];
+  let l=1;for(let i=0;i<t.length;i++)if(xp>=t[i])l=i+1;
+  return{lv:l,cur:t[l-1]||0,nxt:t[l]||t[t.length-1]};
+}
+function clsName(l){
+  if(l>=10)return'👑 傳說 Embedded 工程師';
+  if(l>=8)return'🏆 系統設計大師';
+  if(l>=6)return'🔥 演算法征服者';
+  if(l>=4)return'💡 指針操控師';
+  if(l>=2)return'🌱 Bit 魔法師';
+  return'⚔️ 新手工程師 — 剛踏入地下城';
+}
+const tCls={bit:'t-bit',ptr:'t-ptr',mem:'t-mem',stk:'t-stk',tre:'t-tre',sys:'t-sys'};
+const tLbl={bit:'Bit',ptr:'Pointer',mem:'Memory',stk:'Stack',tre:'Tree',sys:'System'};
+const dCls={e:'d-e',m:'d-m',h:'d-h'};
+const dLbl={e:'Easy',m:'Med',h:'Hard'};
+
+function renderHero(){
+  const s=calc();
+  const{lv,cur,nxt}=lvInfo(s.xp);
+  const pct=nxt>cur?Math.round((s.xp-cur)/(nxt-cur)*100):100;
+  document.getElementById('lv-badge').textContent='Lv.'+lv;
+  document.getElementById('cls-lbl').textContent=clsName(lv);
+  document.getElementById('xp-fill').style.width=pct+'%';
+  document.getElementById('xp-val').textContent=s.xp+'/'+nxt;
+  document.getElementById('stk-fill').style.width=Math.min(Math.round(s.streak/14*100),100)+'%';
+  document.getElementById('stk-val').textContent=s.streak+'天';
+  document.getElementById('s-done').textContent=s.done;
+  document.getElementById('s-pct').textContent=Math.round(s.done/31*100)+'%';
+  document.getElementById('s-xp').textContent=s.xp;
+  const bhp=31-s.done;
+  document.getElementById('boss-fill').style.width=Math.round(bhp/31*100)+'%';
+  document.getElementById('boss-hp-lbl').textContent='HP '+bhp;
+  if(s.done>=31){document.getElementById('boss-card').classList.add('boss-def');document.getElementById('boss-ico').textContent='💀';document.getElementById('boss-name').textContent='Boss 已被擊敗！準備好迎接 Offer！';}
+  const today=new Date(),cal=document.getElementById('cal-row');
+  cal.innerHTML='';
+  for(let i=6;i>=0;i--){const d=new Date(today);d.setDate(today.getDate()-i);const k=d.toISOString().slice(0,10);const el=document.createElement('div');el.className='cal-day'+(window.ST.dlog&&window.ST.dlog[k]?' lit':'')+(i===0?' today':'');el.textContent=d.getDate();cal.appendChild(el);}
+  const rp=Math.round(s.done/31*100);
+  document.getElementById('ring-circle').setAttribute('stroke-dashoffset',201-Math.round(201*rp/100));
+  document.getElementById('ring-txt').textContent=rp+'%';
+  const rl=document.getElementById('ring-lbl');rl.innerHTML='';
+  [{label:'Bit',color:'#7F77DD',done:s.td.bit,total:6},{label:'Pointer',color:'#1D9E75',done:s.td.ptr,total:6},{label:'Memory',color:'#BA7517',done:s.td.mem,total:5},{label:'Stack',color:'#D4537E',done:s.td.stk,total:5},{label:'Tree',color:'#3B6D11',done:s.td.tre,total:5},{label:'System',color:'#D85A30',done:s.td.sys,total:4}].forEach(c=>{const div=document.createElement('div');div.className='ring-lbl';div.innerHTML=`<span class="ring-dot" style="background:${c.color}"></span><span style="font-size:11px;color:var(--txt2)">${c.label} <strong style="color:var(--txt)">${c.done}/${c.total}</strong></span>`;rl.appendChild(div);});
+}
+function renderDungeon(){
+  const grid=document.getElementById('dung-grid');grid.innerHTML='';
+  DUNG.forEach((d,i)=>{
+    const total=d.ids.length,done=d.ids.filter(id=>window.ST.done[id]).length,pct=Math.round(done/total*100);
+    const locked=i>0&&DUNG[i-1].ids.filter(id=>window.ST.done[id]).length<Math.ceil(DUNG[i-1].ids.length/2);
+    const comp=done===total;
+    const card=document.createElement('div');
+    card.className='dung-card'+(comp?' done':'')+(locked?' locked':'');
+    card.innerHTML=`<div class="dung-head"><div class="dung-ico" style="background:${d.bg}">${d.ico}</div><div style="flex:1;min-width:0"><div class="dung-title">${d.name}</div><div class="dung-sub">${d.sub}</div></div><span class="dung-pct" style="color:${comp?'#0F6E56':pct>0?'#7F77DD':'var(--txt2)'}">${pct}%</span></div><div class="bar-track" style="height:6px"><div class="bar-fill" style="background:${comp?'#1D9E75':'#7F77DD'};width:${pct}%"></div></div><div style="font-size:11px;color:var(--txt2);margin-top:6px;display:flex;justify-content:space-between"><span>${done}/${total} 題</span>${locked?'<span>🔒 需解鎖</span>':''}${comp?'<span style="color:#0F6E56">✓ 通關</span>':''}</div>`;
+    if(!locked)card.onclick=()=>{setF(d.id,null);go('quests');};
+    grid.appendChild(card);
+  });
+}
+let curF='all';
+function renderQuests(f){
+  const list=document.getElementById('q-list');list.innerHTML='';
+  const qs=f==='done'?QS.filter(q=>window.ST.done[q.id]):f==='all'?QS:QS.filter(q=>q.tag===f);
+  if(!qs.length){list.innerHTML='<div class="empty-state">沒有符合的任務</div>';return;}
+  qs.forEach(q=>{
+    const done=!!window.ST.done[q.id];
+    const row=document.createElement('div');row.className='quest-row'+(done?' done':'');
+    row.innerHTML=`<div class="chk">${done?'<i class="ti ti-check"></i>':''}</div><div class="q-body"><div class="q-title">${q.t}</div><div class="q-desc">${q.d}</div></div><div class="q-badges"><span class="badge ${dCls[q.df]}">${dLbl[q.df]}</span><span class="badge ${tCls[q.tag]}">${tLbl[q.tag]}</span><span class="xp-tag">+${q.xp}</span><a class="lc-link" href="${q.url}" target="_blank" onclick="event.stopPropagation()">LC ↗</a></div>`;
+    row.onclick=()=>toggle(q.id);
+    list.appendChild(row);
+  });
+}
+function renderAch(){
+  const s=calc();const grid=document.getElementById('ach-grid');grid.innerHTML='';
+  ACHS.forEach(a=>{const on=a.c(s);const card=document.createElement('div');card.className='ach-card'+(on?' on':'');card.innerHTML=`<div class="ach-icon${on?'':' ach-locked'}">${a.ico}</div><div class="ach-name${on?' on':''}">${a.name}</div><div class="ach-desc${on?' on':''}">${a.desc}</div>`;grid.appendChild(card);});
+}
+async function toggle(id){
+  const q=QS.find(x=>x.id===id);const was=window.ST.done[id];window.ST.done[id]=!was;
+  if(!was){
+    const k=new Date().toISOString().slice(0,10);
+    window.ST.dlog=window.ST.dlog||{};
+    window.ST.dlog[k]=(window.ST.dlog[k]||0)+1;
+    window.ST.dmax=Math.max(window.ST.dmax||0,window.ST.dlog[k]);
+    const s=calc();const prev=ACHS.filter(a=>a.c({...s,done:s.done-1,xp:s.xp-q.xp}));const newA=ACHS.filter(a=>a.c(s)&&!prev.find(p=>p.id===a.id));
+    showToast(newA.length?newA[0].ico+' 成就解鎖：'+newA[0].name:'⚔️ +'+q.xp+' XP — '+q.t.slice(0,20));
+  }
+  if(window.firebaseSave) await window.firebaseSave();
+  renderAll();
+}
+function showToast(msg){const el=document.getElementById('toast');document.getElementById('toast-msg').textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2600);}
+function go(name){
+  document.querySelectorAll('.nav-btn').forEach((b,i)=>b.classList.toggle('active',['hero','dungeon','quests','ach'][i]===name));
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('s-'+name).classList.add('active');
+  if(name==='hero')renderHero();else if(name==='dungeon')renderDungeon();else if(name==='quests')renderQuests(curF);else renderAch();
+}
+function setF(f,btn){curF=f;if(btn){document.querySelectorAll('.flt').forEach(b=>b.classList.remove('on'));btn.classList.add('on');}renderQuests(f);}
+window.renderAll=function(){
+  renderHero();
+  if(document.getElementById('s-dungeon').classList.contains('active'))renderDungeon();
+  if(document.getElementById('s-quests').classList.contains('active'))renderQuests(curF);
+  if(document.getElementById('s-ach').classList.contains('active'))renderAch();
+};
+renderHero();
+</script>
+</body>
+</html>
